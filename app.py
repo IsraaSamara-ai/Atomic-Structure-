@@ -343,7 +343,7 @@ if(ni>0&&nf>0&&ni!==nf){
 var fromLv=levels.find(function(l){return l.n===ni;});var toLv=levels.find(function(l){return l.n===nf;});
 if(fromLv&&toLv){var ax=220;ctx.strokeStyle=tType==='emit'?'#ff6b35':'#22d3ee';ctx.fillStyle=tType==='emit'?'#ff6b35':'#22d3ee';ctx.lineWidth=3;
 ctx.beginPath();ctx.moveTo(ax,fromLv.y);ctx.lineTo(ax,toLv.y);ctx.stroke();
-var dir=toLv.y>fromLv.y?1:-1;ctx.beginPath();ctx.moveTo(ax,toLv.y);ctx.lineTo(ax-8,toLv.y-dir*12);ctx.lineTo(ax+8,toLv.y-dir*12);ctx.closePath();ctx.fill();
+var dir=tType==='emit'?1:-1;ctx.beginPath();ctx.moveTo(ax,toLv.y);ctx.lineTo(ax-8,toLv.y-dir*12);ctx.lineTo(ax+8,toLv.y-dir*12);ctx.closePath();ctx.fill();
 var midY=(fromLv.y+toLv.y)/2;ctx.strokeStyle=tType==='emit'?'#ffcc00':'#00ffcc';ctx.lineWidth=2;ctx.beginPath();
 for(var i=0;i<60;i++){var px=ax+30+i*1.5;var py=midY+Math.sin(i*0.5)*8;if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}ctx.stroke();
 ctx.font='bold 13px sans-serif';ctx.fillStyle=tType==='emit'?'#ffcc00':'#00ffcc';ctx.textAlign='left';ctx.fillText(tType==='emit'?'photon emitted':'photon absorbed',ax+35,midY-15);
