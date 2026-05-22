@@ -1230,110 +1230,277 @@ elif section == "🏥 الأشعة السينية":
         xz = st.selectbox("عنصر المصعد:", ["التنگستن (Z=74)", "النحاس (Z=29)", "الموليديدنوم (Z=42)"], key="xz_sel")
 
     xv_v = xv * 1000
-    min_wl = H_PLANCK * C_LIGHT / (EV_TO_J * xv_v) * 1e9  # نانومتر
+    min_wl = H_PLANCK * C_LIGHT / (EV_TO_J * xv_v) * 1e9
 
-    # ===== بيانات العناصر (Kα, Kβ بالنانومتر + طاقة حافة K بالـ keV) =====
     elements = {
-        "التنگستن (Z=74)":      {"ka": 0.0209, "kb": 0.0184, "k_edge": 69.5},
-        "النحاس (Z=29)":        {"ka": 0.1542, "kb": 0.1392, "k_edge": 8.98},
-        "الموليديدنوم (Z=42)":  {"ka": 0.0711, "kb": 0.0632, "k_edge": 20.0},
+        "التنگستن (Z=74)":     {"ka": 0.0209, "kb": 0.0184, "k_edge": 69.5},
+        "النحاس (Z=29)":       {"ka": 0.1542, "kb": 0.1392, "k_edge": 8.98},
+        "الموليديدنوم (Z=42)": {"ka": 0.0711, "kb": 0.0632, "k_edge": 20.0},
     }
     elem = elements[xz]
 
-    # ===== إنشاء الرسم البياني =====
-    fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0d1117')
-    ax.set_facecolor('#0d1117')
-
-    # محور X متكيّف حسب العنصر والجهد
     x_max = max(min_wl * 6, elem["ka"] * 3, 0.08)
-    lam = np.linspace(0.001, x_max, 3000)
-
-    # --- 1) الطيف المتصل (Bremsstrahlung) ---
-    cont_raw = np.where(
-        lam >= min_wl,
-        (1.0 / min_wl - 1.0 / lam),
-        0.0
-    )
-    cont = cont_raw * np.exp(-(lam - min_wl) / min_wl)
-    if cont.max() > 0:
-        cont /= cont.max()
-
-    # --- 2) القمم المميزة: تُضاف فوق المتصل مباشرةً ---
-    sigma = elem["ka"] * 0.02
     ka_on = xv >= elem["k_edge"]
     kb_on = xv >= elem["k_edge"]
 
-    ka_h = 0.55 * min(1.0, (xv - elem["k_edge"]) / 15.0) if ka_on else 0.0
-    kb_h = 0.28 * min(1.0, (xv - elem["k_edge"]) / 15.0) if kb_on else 0.0
+    chart_html = f"""
+    <div id="xrayChart" style="width:100%;height:380px;background:#0d1117;border-radius:12px;border:1px solid #21262d;overflow:hidden;position:relative;">
+        <canvas id="xCanvas"></canvas>
+    </div>
+    <script>
+    (function(){{
+        var c = document.getElementById('xCanvas');
+        var p = c.parentElement;
+        c.width = p.clientWidth * 2;
+        c.height = p.clientHeight * 2;
+        c.style.width = '100%';
+        c.style.height = '100%';
+        var ctx = c.getContext('2d');
+        ctx.scale(2, 2);
 
-    ka_peak = ka_h * np.exp(-((lam - elem["ka"])**2) / (2 * sigma**2))
-    kb_peak = kb_h * np.exp(-((lam - elem["kb"])**2) / (2 * sigma**2))
+        var W = p.clientWidth, H = p.clientHeight;
+        var pad = {{t:45, r:30, b:55, l:60}};
+        var pW = W - pad.l - pad.r;
+        var pH = H - pad.t - pad.b;
 
-    total = cont + ka_peak + kb_peak
+        var minWL = {min_wl};
+        var xMax = {x_max};
+        var kaW = {elem["ka"]}, kbW = {elem["kb"]};
+        var kaOn = {str(ka_on).lower()}, kbOn = {str(kb_on).lower()};
+        var kaH = kaOn ? 0.55 * Math.min(1, ({xv} - {elem["k_edge"]}) / 15) : 0;
+        var kbH = kbOn ? 0.28 * Math.min(1, ({xv} - {elem["k_edge"]}) / 15) : 0;
 
-    # ===== الرسم =====
-    ax.fill_between(lam, 0, cont, color='#00e5ff', alpha=0.12)
-    ax.plot(lam, cont, color='#00e5ff', lw=2.5,
-            label=ar('الطيف المتصل (Bremsstrahlung)'))
+        function xToP(x){{ return pad.l + (x / xMax) * pW; }}
+        function yToP(y){{ return pad.t + (1 - y / 1.3) * pH; }}
 
-    # المنطقة البرتقالية = الفرق (الخطوط المميزة فوق المتصل)
-    ax.fill_between(lam, cont, total, where=(total > cont),
-                    color='#ff6b35', alpha=0.50)
-    ax.plot(lam, total, color='#ff6b35', lw=2.5,
-            label=ar('الطيف الكلي (متصل + مميز)'))
+        // grid
+        ctx.strokeStyle = 'rgba(139,148,158,0.08)';
+        ctx.lineWidth = 1;
+        for(var i=0; i<=5; i++){{
+            var yy = pad.t + (i/5)*pH;
+            ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(pad.l+pW, yy); ctx.stroke();
+        }}
+        for(var i=0; i<=10; i++){{
+            var xx = pad.l + (i/10)*pW;
+            ctx.beginPath(); ctx.moveTo(xx, pad.t); ctx.lineTo(xx, pad.t+pH); ctx.stroke();
+        }}
 
-    # خط λmin
-    ax.axvline(min_wl, color='#ef4444', ls='--', lw=1.5, alpha=0.8)
-    ax.text(min_wl + x_max * 0.02, 1.22,
-            f'λmin = {min_wl:.4f} nm',
-            color='#ef4444', fontsize=11, fontweight='bold', va='top')
+        // compute continuous
+        var pts = [];
+        var contMax = 0;
+        for(var i=0; i<=400; i++){{
+            var lam = 0.0001 + (i/400) * xMax;
+            var val = 0;
+            if(lam >= minWL){{
+                val = (1/minWL - 1/lam) * Math.exp(-(lam - minWL)/minWL);
+            }}
+            if(val > contMax) contMax = val;
+            pts.push({{x: lam, v: val}});
+        }}
+        if(contMax > 0) for(var i=0; i<pts.length; i++) pts[i].v /= contMax;
 
-    # تسميات Kα و Kβ
-    if ka_on:
-        ka_y = float(np.interp(elem["ka"], lam, total))
-        ax.annotate('Kα', xy=(elem["ka"], ka_y),
-                    xytext=(elem["ka"] + x_max * 0.06, ka_y + 0.08),
-                    fontsize=18, fontweight='bold', color='#ff6b35',
-                    arrowprops=dict(arrowstyle='->', color='#ff6b35', lw=2.2),
-                    ha='center', va='bottom')
-        ax.plot([elem["ka"], elem["ka"]], [0, ka_y],
-                color='#ff6b35', ls=':', lw=1, alpha=0.3)
+        // add characteristic peaks ON TOP of continuous
+        var sig = kaW * 0.02;
+        for(var i=0; i<pts.length; i++){{
+            var lam = pts[i].x;
+            if(kaOn) pts[i].v += kaH * Math.exp(-Math.pow(lam-kaW,2)/(2*sig*sig));
+            if(kbOn) pts[i].v += kbH * Math.exp(-Math.pow(lam-kbW,2)/(2*sig*sig));
+        }}
 
-    if kb_on:
-        kb_y = float(np.interp(elem["kb"], lam, total))
-        ax.annotate('Kβ', xy=(elem["kb"], kb_y),
-                    xytext=(elem["kb"] - x_max * 0.06, kb_y + 0.10),
-                    fontsize=18, fontweight='bold', color='#ff6b35',
-                    arrowprops=dict(arrowstyle='->', color='#ff6b35', lw=2.2),
-                    ha='center', va='bottom')
-        ax.plot([elem["kb"], elem["kb"]], [0, kb_y],
-                color='#ff6b35', ls=':', lw=1, alpha=0.3)
+        // fill under continuous only (cyan)
+        ctx.beginPath();
+        ctx.moveTo(xToP(0), yToP(0));
+        for(var i=0; i<pts.length; i++){{
+            var cv = 0;
+            var lam = pts[i].x;
+            if(lam >= minWL){{
+                cv = (1/minWL - 1/lam) * Math.exp(-(lam - minWL)/minWL);
+            }}
+            if(contMax > 0) cv /= contMax;
+            ctx.lineTo(xToP(lam), yToP(cv));
+        }}
+        ctx.lineTo(xToP(xMax), yToP(0));
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0,229,255,0.10)';
+        ctx.fill();
 
-    # تنسيق المحاور
-    ax.set_xlim(0, x_max)
-    ax.set_ylim(-0.08, 1.35)
-    ax.set_xlabel(ar('الطول الموجي λ (نانومتر nm)'),
-                  fontsize=13, color='white', labelpad=10)
-    ax.set_ylabel(ar('الشدة النسبية'),
-                  fontsize=13, color='white', labelpad=10)
-    ax.set_title(ar(f'طيف الأشعة السينية — {xz} عند {xv} كيلوفولت'),
-                 fontsize=14, fontweight='bold', color='white', pad=14)
-    ax.legend(loc='upper right', fontsize=11,
-              facecolor='#161b22', edgecolor='#30363d', labelcolor='white')
-    ax.tick_params(colors='#8b949e', labelsize=10)
-    for s in ('top', 'right'):
-        ax.spines[s].set_visible(False)
-    for s in ('bottom', 'left'):
-        ax.spines[s].set_color('#30363d')
-    ax.grid(True, alpha=0.08, color='#8b949e')
-    plt.tight_layout()
-    st.pyplot(fig, use_container_width=True)
+        // fill characteristic peaks (orange) = total - continuous
+        ctx.beginPath();
+        var started = false;
+        for(var i=0; i<pts.length; i++){{
+            var lam = pts[i].x;
+            var cv = 0;
+            if(lam >= minWL){{
+                cv = (1/minWL - 1/lam) * Math.exp(-(lam - minWL)/minWL);
+            }}
+            if(contMax > 0) cv /= contMax;
+            var diff = pts[i].v - cv;
+            if(diff > 0.005){{
+                if(!started){{ ctx.moveTo(xToP(lam), yToP(cv)); started = true; }}
+                ctx.lineTo(xToP(lam), yToP(pts[i].v));
+            }}
+        }}
+        if(started){{
+            // close back along continuous
+            for(var i=pts.length-1; i>=0; i--){{
+                var lam = pts[i].x;
+                var cv = 0;
+                if(lam >= minWL){{
+                    cv = (1/minWL - 1/lam) * Math.exp(-(lam - minWL)/minWL);
+                }}
+                if(contMax > 0) cv /= contMax;
+                var diff = pts[i].v - cv;
+                if(diff > 0.005){{
+                    ctx.lineTo(xToP(lam), yToP(cv));
+                    break;
+                }}
+            }}
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255,107,53,0.50)';
+            ctx.fill();
+        }}
 
-    # تنبيه إذا كان الجهد أقل من حافة K
+        // continuous line
+        ctx.beginPath();
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 2.5;
+        var lineStarted = false;
+        for(var i=0; i<pts.length; i++){{
+            var lam = pts[i].x;
+            var cv = 0;
+            if(lam >= minWL){{
+                cv = (1/minWL - 1/lam) * Math.exp(-(lam - minWL)/minWL);
+            }}
+            if(contMax > 0) cv /= contMax;
+            if(!lineStarted && cv > 0.001){{ ctx.moveTo(xToP(lam), yToP(cv)); lineStarted = true; }}
+            else if(lineStarted) ctx.lineTo(xToP(lam), yToP(cv));
+        }}
+        ctx.stroke();
+
+        // total line
+        ctx.beginPath();
+        ctx.strokeStyle = '#ff6b35';
+        ctx.lineWidth = 2.5;
+        for(var i=0; i<pts.length; i++){{
+            if(i===0) ctx.moveTo(xToP(pts[i].x), yToP(pts[i].v));
+            else ctx.lineTo(xToP(pts[i].x), yToP(pts[i].v));
+        }}
+        ctx.stroke();
+
+        // λmin dashed line
+        ctx.setLineDash([6,4]);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(xToP(minWL), yToP(0));
+        ctx.lineTo(xToP(minWL), yToP(1.15));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 12px Tahoma';
+        ctx.textAlign = 'left';
+        ctx.fillText('λmin = ' + minWL.toFixed(4) + ' nm', xToP(minWL)+5, yToP(1.15)-5);
+
+        // Kα label
+        if(kaOn){{
+            var kaX = xToP(kaW);
+            var kaY = yToP(pts[Math.round((kaW/xMax)*400)].v);
+            ctx.setLineDash([3,3]);
+            ctx.strokeStyle = 'rgba(255,107,53,0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(kaX, yToP(0)); ctx.lineTo(kaX, kaY); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.strokeStyle = '#ff6b35';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(kaX, kaY); ctx.lineTo(kaX+35, kaY-25); ctx.stroke();
+            ctx.fillStyle = '#ff6b35';
+            ctx.font = 'bold 16px Tahoma';
+            ctx.textAlign = 'center';
+            ctx.fillText('Kα', kaX+45, kaY-28);
+        }}
+
+        // Kβ label
+        if(kbOn){{
+            var kbX = xToP(kbW);
+            var kbY = yToP(pts[Math.round((kbW/xMax)*400)].v);
+            ctx.setLineDash([3,3]);
+            ctx.strokeStyle = 'rgba(255,107,53,0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(kbX, yToP(0)); ctx.lineTo(kbX, kbY); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.strokeStyle = '#ff6b35';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(kbX, kbY); ctx.lineTo(kbX-35, kbY-30); ctx.stroke();
+            ctx.fillStyle = '#ff6b35';
+            ctx.font = 'bold 16px Tahoma';
+            ctx.textAlign = 'center';
+            ctx.fillText('Kβ', kbX-45, kbY-33);
+        }}
+
+        // axes labels
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px Tahoma';
+        ctx.textAlign = 'center';
+        for(var i=0; i<=10; i++){{
+            var val = (i/10)*xMax;
+            ctx.fillText(val.toFixed(3), pad.l + (i/10)*pW, pad.t + pH + 18);
+        }}
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 13px Tahoma';
+        ctx.fillText('الطول الموجي λ (نانومتر)', pad.l + pW/2, H - 8);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '11px Tahoma';
+        for(var i=0; i<=5; i++){{
+            var val = ((5-i)/5)*1.3;
+            ctx.fillText(val.toFixed(1), pad.l - 8, pad.t + (i/5)*pH + 4);
+        }}
+        ctx.save();
+        ctx.translate(14, pad.t + pH/2);
+        ctx.rotate(-Math.PI/2);
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 13px Tahoma';
+        ctx.textAlign = 'center';
+        ctx.fillText('الشدة النسبية', 0, 0);
+        ctx.restore();
+
+        // title
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 14px Tahoma';
+        ctx.textAlign = 'center';
+        ctx.fillText('طيف الأشعة السينية — {xz} عند {xv} كيلوفولت', W/2, 22);
+
+        // legend
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(W-190, 10, 14, 3);
+        ctx.fillStyle = '#ccc';
+        ctx.font = '11px Tahoma';
+        ctx.textAlign = 'right';
+        ctx.fillText('متصل', W-30, 16);
+
+        ctx.fillStyle = '#ff6b35';
+        ctx.fillRect(W-190, 25, 14, 3);
+        ctx.fillStyle = '#ccc';
+        ctx.fillText('كلي (متصل+مميز)', W-30, 31);
+
+        // axes lines
+        ctx.strokeStyle = '#30363d';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, pad.t+pH);
+        ctx.lineTo(pad.l+pW, pad.t+pH);
+        ctx.stroke();
+    }})();
+    </script>
+    """
+    st.html(chart_html)
+
     if not ka_on:
         st.info(f"⚠️ جهد {xv} kV أقل من طاقة حافة K ({elem['k_edge']} keV) لهذا العنصر → **لا تظهر الخطوط المميزة**")
 
-    # ===== معادلة λmin (محفوظة من الأصل) =====
     st.markdown(f"""
     <div class="card card-accent">
         <div class="equation-box">lambda_min = hc/(e·dV) = {min_wl:.4f} nm</div>
@@ -1341,7 +1508,6 @@ elif section == "🏥 الأشعة السينية":
     </div>
     """, unsafe_allow_html=True)
 
-    # ===== بطاقات الشرح المُحدّثة =====
     st.markdown("""
     <div class="card">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
