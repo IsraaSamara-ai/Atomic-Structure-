@@ -1495,7 +1495,7 @@ elif section == "🏥 الأشعة السينية":
     }})();
     </script>
     """
-    st.html(chart_html)
+    components.html(chart_html, height=390)
 
     if not ka_on:
         st.info(f"⚠️ جهد {xv} kV أقل من طاقة حافة K ({elem['k_edge']} keV) لهذا العنصر → **لا تظهر الخطوط المميزة**")
