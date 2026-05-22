@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import numpy as np
 import json
+import matplotlib.pyplot as plt
 
 # ============================================================
 # PAGE CONFIG
@@ -1221,36 +1222,140 @@ elif section == "🏥 الأشعة السينية":
     """, unsafe_allow_html=True)
 
     st.markdown('<h3 class="sub-title">📊 طيف الأشعة السينية</h3>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="card">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-            <div style="background:rgba(0,229,255,0.05);border:1px solid rgba(0,229,255,0.2);border-radius:12px;padding:16px;">
-                <h4 style="color:#00e5ff;margin:0 0 8px 0;">الطيف المتصل (Bremsstrahlung)</h4>
-                <p style="margin:0;color:#94a3b8;font-size:0.9em;">تباطؤ الإلكترونات وفقدان طاقة حركية.</p>
-            </div>
-            <div style="background:rgba(255,107,53,0.05);border:1px solid rgba(255,107,53,0.2);border-radius:12px;padding:16px;">
-                <h4 style="color:#ff6b35;margin:0 0 8px 0;">الطيف الخطي (المميز)</h4>
-                <p style="margin:0;color:#94a3b8;font-size:0.9em;">تحرير إلكترون داخلي وانتقال خارجي لملء الفراغ → خطوط Ka و Kb.</p>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
     xc1, xc2 = st.columns(2)
     with xc1:
         xv = st.slider("جهد التسريع dV (kV):", 10, 100, 50, key="xv_kv")
     with xc2:
         xz = st.selectbox("عنصر المصعد:", ["التنگستن (Z=74)", "النحاس (Z=29)", "الموليديدنوم (Z=42)"], key="xz_sel")
+
     xv_v = xv * 1000
-    min_wl = H_PLANCK * C_LIGHT / (EV_TO_J * xv_v) * 1e9
-    components.html(xray_spectrum(min_wl_nm=min_wl), height=370)
+    min_wl = H_PLANCK * C_LIGHT / (EV_TO_J * xv_v) * 1e9  # نانومتر
+
+    # ===== بيانات العناصر (Kα, Kβ بالنانومتر + طاقة حافة K بالـ keV) =====
+    elements = {
+        "التنگستن (Z=74)":      {"ka": 0.0209, "kb": 0.0184, "k_edge": 69.5},
+        "النحاس (Z=29)":        {"ka": 0.1542, "kb": 0.1392, "k_edge": 8.98},
+        "الموليديدنوم (Z=42)":  {"ka": 0.0711, "kb": 0.0632, "k_edge": 20.0},
+    }
+    elem = elements[xz]
+
+    # ===== إنشاء الرسم البياني =====
+    fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0d1117')
+    ax.set_facecolor('#0d1117')
+
+    # محور X متكيّف حسب العنصر والجهد
+    x_max = max(min_wl * 6, elem["ka"] * 3, 0.08)
+    lam = np.linspace(0.001, x_max, 3000)
+
+    # --- 1) الطيف المتصل (Bremsstrahlung) ---
+    cont_raw = np.where(
+        lam >= min_wl,
+        (1.0 / min_wl - 1.0 / lam),
+        0.0
+    )
+    cont = cont_raw * np.exp(-(lam - min_wl) / min_wl)
+    if cont.max() > 0:
+        cont /= cont.max()
+
+    # --- 2) القمم المميزة: تُضاف فوق المتصل مباشرةً ---
+    sigma = elem["ka"] * 0.02
+    ka_on = xv >= elem["k_edge"]
+    kb_on = xv >= elem["k_edge"]
+
+    ka_h = 0.55 * min(1.0, (xv - elem["k_edge"]) / 15.0) if ka_on else 0.0
+    kb_h = 0.28 * min(1.0, (xv - elem["k_edge"]) / 15.0) if kb_on else 0.0
+
+    ka_peak = ka_h * np.exp(-((lam - elem["ka"])**2) / (2 * sigma**2))
+    kb_peak = kb_h * np.exp(-((lam - elem["kb"])**2) / (2 * sigma**2))
+
+    total = cont + ka_peak + kb_peak
+
+    # ===== الرسم =====
+    ax.fill_between(lam, 0, cont, color='#00e5ff', alpha=0.12)
+    ax.plot(lam, cont, color='#00e5ff', lw=2.5,
+            label=ar('الطيف المتصل (Bremsstrahlung)'))
+
+    # المنطقة البرتقالية = الفرق (الخطوط المميزة فوق المتصل)
+    ax.fill_between(lam, cont, total, where=(total > cont),
+                    color='#ff6b35', alpha=0.50)
+    ax.plot(lam, total, color='#ff6b35', lw=2.5,
+            label=ar('الطيف الكلي (متصل + مميز)'))
+
+    # خط λmin
+    ax.axvline(min_wl, color='#ef4444', ls='--', lw=1.5, alpha=0.8)
+    ax.text(min_wl + x_max * 0.02, 1.22,
+            f'λmin = {min_wl:.4f} nm',
+            color='#ef4444', fontsize=11, fontweight='bold', va='top')
+
+    # تسميات Kα و Kβ
+    if ka_on:
+        ka_y = float(np.interp(elem["ka"], lam, total))
+        ax.annotate('Kα', xy=(elem["ka"], ka_y),
+                    xytext=(elem["ka"] + x_max * 0.06, ka_y + 0.08),
+                    fontsize=18, fontweight='bold', color='#ff6b35',
+                    arrowprops=dict(arrowstyle='->', color='#ff6b35', lw=2.2),
+                    ha='center', va='bottom')
+        ax.plot([elem["ka"], elem["ka"]], [0, ka_y],
+                color='#ff6b35', ls=':', lw=1, alpha=0.3)
+
+    if kb_on:
+        kb_y = float(np.interp(elem["kb"], lam, total))
+        ax.annotate('Kβ', xy=(elem["kb"], kb_y),
+                    xytext=(elem["kb"] - x_max * 0.06, kb_y + 0.10),
+                    fontsize=18, fontweight='bold', color='#ff6b35',
+                    arrowprops=dict(arrowstyle='->', color='#ff6b35', lw=2.2),
+                    ha='center', va='bottom')
+        ax.plot([elem["kb"], elem["kb"]], [0, kb_y],
+                color='#ff6b35', ls=':', lw=1, alpha=0.3)
+
+    # تنسيق المحاور
+    ax.set_xlim(0, x_max)
+    ax.set_ylim(-0.08, 1.35)
+    ax.set_xlabel(ar('الطول الموجي λ (نانومتر nm)'),
+                  fontsize=13, color='white', labelpad=10)
+    ax.set_ylabel(ar('الشدة النسبية'),
+                  fontsize=13, color='white', labelpad=10)
+    ax.set_title(ar(f'طيف الأشعة السينية — {xz} عند {xv} كيلوفولت'),
+                 fontsize=14, fontweight='bold', color='white', pad=14)
+    ax.legend(loc='upper right', fontsize=11,
+              facecolor='#161b22', edgecolor='#30363d', labelcolor='white')
+    ax.tick_params(colors='#8b949e', labelsize=10)
+    for s in ('top', 'right'):
+        ax.spines[s].set_visible(False)
+    for s in ('bottom', 'left'):
+        ax.spines[s].set_color('#30363d')
+    ax.grid(True, alpha=0.08, color='#8b949e')
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
+
+    # تنبيه إذا كان الجهد أقل من حافة K
+    if not ka_on:
+        st.info(f"⚠️ جهد {xv} kV أقل من طاقة حافة K ({elem['k_edge']} keV) لهذا العنصر → **لا تظهر الخطوط المميزة**")
+
+    # ===== معادلة λmin (محفوظة من الأصل) =====
     st.markdown(f"""
     <div class="card card-accent">
-        <div class="equation-box">lambda_min = hc/(e*dV) = {min_wl:.4f} nm</div>
+        <div class="equation-box">lambda_min = hc/(e·dV) = {min_wl:.4f} nm</div>
         <p style="margin-top:8px;color:#94a3b8;">عند جهد {xv} kV، لا يمكن أن تكون الأشعة أقصر من {min_wl:.4f} nm.</p>
     </div>
     """, unsafe_allow_html=True)
 
+    # ===== بطاقات الشرح المُحدّثة =====
+    st.markdown("""
+    <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div style="background:rgba(0,229,255,0.05);border:1px solid rgba(0,229,255,0.2);border-radius:12px;padding:16px;">
+                <h4 style="color:#00e5ff;margin:0 0 8px 0;">الطيف المتصل (Bremsstrahlung)</h4>
+                <p style="margin:0;color:#94a3b8;font-size:0.9em;">تباطؤ الإلكترونات وفقدان طاقتها الحركية → منحنى يبدأ من الصفر عند <b style="color:#ef4444">λmin</b> ويرتفع ثم يتناقص.</p>
+            </div>
+            <div style="background:rgba(255,107,53,0.05);border:1px solid rgba(255,107,53,0.2);border-radius:12px;padding:16px;">
+                <h4 style="color:#ff6b35;margin:0 0 8px 0;">الطيف الخطي (المميز) — قمم فوق المتصل</h4>
+                <p style="margin:0;color:#94a3b8;font-size:0.9em;"><b style="color:#ff6b35">قمم حادة تُضاف فوق المنحنى المتصل مباشرةً</b> عند أطوال موجية محددة → خطوط Kα و Kβ.</p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown('<h3 class="sub-title">🏥 الاستخدامات الطبية</h3>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card" style="border-left:4px solid #ff3366;">
